@@ -40,21 +40,46 @@ const SUFFIXES = {
   prewash: ["_prewash"],
 };
 
+// Verified against the actual `selected_program` option lists reported by
+// homeconnect_local_hass for a Bosch washer + dryer — the prefix has no
+// underscore between "laundry" and "care" (unlike the entity_id suffix
+// convention), and program names are compact, no underscores. The dryer
+// additionally repeats each name 2-3x with underscores (an upstream
+// Home Connect quirk, looks like merged language variants) — _programLabel()
+// strips the whole prefix and leaves the rest as-is via a fallback, so an
+// unmapped program still shows something readable instead of "".
 const DEFAULT_PROGRAMS = {
-  laundry_care_washer_program_cotton: "Cotton",
-  laundry_care_washer_program_mix: "Mix",
-  laundry_care_washer_program_easy_care: "Easy Care",
-  laundry_care_washer_program_delicates_silk: "Delicates / Silk",
-  laundry_care_washer_program_wool: "Wool",
-  laundry_care_dryer_program_cotton: "Cotton",
-  laundry_care_dryer_program_synthetic: "Synthetic",
-  laundry_care_dryer_program_mix: "Mix",
-  laundry_care_dryer_program_towels: "Towels",
-  laundry_care_dryer_program_time_cold: "Timed — cold",
-  laundry_care_dryer_program_time_warm: "Timed — warm",
-  laundry_care_dryer_program_hygiene: "Hygiene",
-  laundry_care_dryer_program_delicates: "Delicates",
-  laundry_care_dryer_program_business_shirts: "Business shirts",
+  laundrycare_washer_program_cotton: "Cotton",
+  laundrycare_washer_program_cotton_cottoneco: "Cotton Eco",
+  laundrycare_washer_program_mix: "Mix",
+  laundrycare_washer_program_easycare: "Easy Care",
+  laundrycare_washer_program_delicatessilk: "Delicates / Silk",
+  laundrycare_washer_program_wool: "Wool",
+  laundrycare_washer_program_darkwash: "Dark Wash",
+  laundrycare_washer_program_sensitive: "Sensitive",
+  laundrycare_washer_program_shirtsblouses: "Shirts / Blouses",
+  laundrycare_washer_program_drumclean: "Drum Clean",
+  laundrycare_washer_program_auto30: "Auto 30°C",
+  laundrycare_washer_program_auto60: "Auto 60°C",
+  laundrycare_common_program_juststart: "Just Start",
+  laundrycare_dryer_program_cotton_cotton_cotton: "Cotton",
+  laundrycare_dryer_program_cottoneco_cottoneco_cottoneco: "Cotton Eco",
+  laundrycare_dryer_program_synthetic_synthetic_synthetic: "Synthetic",
+  laundrycare_dryer_program_mix_mix_mix: "Mix",
+  laundrycare_dryer_program_towels_towels_towels: "Towels",
+  laundrycare_dryer_program_timecold_timecold_timecold: "Timed — cold",
+  laundrycare_dryer_program_timewarm_timewarm_timewarm: "Timed — warm",
+  laundrycare_dryer_program_hygiene_hygiene_hygiene: "Hygiene",
+  laundrycare_dryer_program_delicates_delicates_delicates: "Delicates",
+  laundrycare_dryer_program_jeans_jeans_jeans: "Jeans",
+  laundrycare_dryer_program_shirtblouses_shirtblouses_shirtblouses: "Shirts / Blouses",
+  laundrycare_dryer_program_woolfinish_woolfinish_woolfinish: "Wool finish",
+  laundrycare_dryer_program_outdoor_outdoor_sportswear: "Outdoor / Sportswear",
+  laundrycare_dryer_program_silentdry_silentdry_silentdry: "Silent dry",
+  laundrycare_dryer_program_super40_super40_super40: "Super 40",
+  laundrycare_dryer_program_bedlinens_bedlinens_bedlinens: "Bed linens",
+  laundrycare_dryer_program_coldrefresh_coldrefresh_coldrefresh: "Cold refresh",
+  laundrycare_dryer_program_connecteddry: "Connected dry",
 };
 
 const TEXT = {
@@ -215,9 +240,18 @@ class LaundryCard extends HTMLElement {
         .map((entry) => entry.ei || entry.entity_id)
         .filter(Boolean);
 
+      // Some roles exist under two domains on the same appliance — e.g.
+      // "door" as both binary_sensor (on/off) and sensor (open/closed/
+      // locked, matching what _door() below expects). DOMAIN_PREFERENCE
+      // picks deterministically instead of relying on registry order.
+      const DOMAIN_PREFERENCE = { door: ["sensor.", "binary_sensor."] };
       this._entities = {};
       for (const [key, suffixes] of Object.entries(SUFFIXES)) {
-        const id = ids.find((candidate) => suffixes.some((suffix) => candidate.endsWith(suffix)));
+        const matches = ids.filter((candidate) => suffixes.some((suffix) => candidate.endsWith(suffix)));
+        const preference = DOMAIN_PREFERENCE[key];
+        const id = preference
+          ? preference.map((domain) => matches.find((m) => m.startsWith(domain))).find(Boolean) || matches[0]
+          : matches[0];
         if (id) this._entities[key] = id;
       }
     } catch (error) {
@@ -275,7 +309,7 @@ class LaundryCard extends HTMLElement {
   _programLabel(value) {
     if (!value) return this._text.noProgram;
     const names = { ...DEFAULT_PROGRAMS, ...(this._config.program_names || {}) };
-    return names[value] || value.replace(/^laundry_care_(washer|dryer)_program_/, "").replaceAll("_", " ");
+    return names[value] || value.replace(/^laundrycare_(washer|dryer|common)_program_/, "").replaceAll("_", " ");
   }
 
   _finish() {
@@ -292,9 +326,15 @@ class LaundryCard extends HTMLElement {
   }
 
   _door() {
-    const state = this._state("door")?.state;
-    if (state === "open") return { label: this._text.open, icon: "mdi:door-open", tone: "warning" };
-    if (state === "locked") return { label: this._text.locked, icon: "mdi:door-closed-lock", tone: "good" };
+    // Handles both shapes: a sensor with open/closed/locked strings
+    // (preferred, see DOMAIN_PREFERENCE in _discover()) and a plain
+    // binary_sensor with on/off, in case a config maps that in manually.
+    const entity = this._state("door");
+    const state = entity?.state;
+    const isBinary = this._entities?.door?.startsWith("binary_sensor.");
+    const open = isBinary ? state === "on" : state === "open";
+    if (open) return { label: this._text.open, icon: "mdi:door-open", tone: "warning" };
+    if (!isBinary && state === "locked") return { label: this._text.locked, icon: "mdi:door-closed-lock", tone: "good" };
     return { label: this._text.closed, icon: "mdi:door-closed", tone: "muted" };
   }
 
@@ -495,7 +535,7 @@ globalThis.customCards.push({
   description: "Home Connect washer / dryer control card",
   preview: true,
   getEntitySuggestion: (hass, entityId) => {
-    if (!matchesEntity(hass.states?.[entityId], ["wasmachine", "washer", "droger", "dryer", "laundry_care"])) return null;
+    if (!matchesEntity(hass.states?.[entityId], ["wasmachine", "washer", "droger", "dryer", "laundrycare"])) return null;
     const device_id = hass.entities?.[entityId]?.device_id;
     if (!device_id) return null;
     return {
