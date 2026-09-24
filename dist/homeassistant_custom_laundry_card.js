@@ -82,6 +82,43 @@ const DEFAULT_PROGRAMS = {
   laundrycare_dryer_program_connecteddry: "Connected dry",
 };
 
+// Labels for the option select-domain values (drying target, spin speed,
+// washing temperature, wrinkle guard) — verified against the actual
+// `options` lists reported by homeconnect_local_hass for a Bosch washer
+// and dryer. Unmapped values still render via the generic fallback in
+// _optionSelectControls() (a spaced-out version of the raw value), so an
+// appliance with values outside this list still shows something readable.
+const OPTION_LABELS = {
+  irondry: "Iron dry",
+  gentledry: "Gentle dry",
+  cupboarddry: "Cupboard dry",
+  cupboarddryplus: "Cupboard dry+",
+  extradry: "Extra dry",
+  off: "Off",
+  min30: "30 min",
+  min60: "60 min",
+  min90: "90 min",
+  min120: "120 min",
+  min180: "180 min",
+  rpm400: "400 rpm",
+  rpm600: "600 rpm",
+  rpm800: "800 rpm",
+  rpm1000: "1000 rpm",
+  rpm1200: "1200 rpm",
+  rpm1400: "1400 rpm",
+  rpm1600: "1600 rpm",
+  auto: "Auto",
+  cold: "Cold",
+  gc20: "20°C",
+  gc30: "30°C",
+  gc40: "40°C",
+  gc50: "50°C",
+  gc60: "60°C",
+  gc70: "70°C",
+  gc80: "80°C",
+  gc90: "90°C",
+};
+
 const TEXT = {
   de: {
     loading: "Wird geladen …",
@@ -441,7 +478,7 @@ class LaundryCard extends HTMLElement {
         const state = this._state(key);
         const options = state.attributes.options;
         const html = options
-          .map((value) => `<option value="${this._escape(value)}" ${value === state.state ? "selected" : ""}>${this._escape(value.replaceAll("_", " "))}</option>`)
+          .map((value) => `<option value="${this._escape(value)}" ${value === state.state ? "selected" : ""}>${this._escape(OPTION_LABELS[value] || value.replaceAll("_", " "))}</option>`)
           .join("");
         return `<section><label><ha-icon icon="${icon}"></ha-icon>${this._escape(label)}</label><div class="select"><select data-select="${key}">${html}</select><ha-icon icon="mdi:chevron-down"></ha-icon></div></section>`;
       })
